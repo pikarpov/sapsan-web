@@ -29,12 +29,19 @@ from streamlit.ReportThread import add_report_ctx
 import json
 from collections import OrderedDict
 import plotly.express as px
+import os
+import signal
+import sys
+from st_state_patch import SessionState
+from multiprocessing import Process
+
 
 cf = configparser.RawConfigParser()
 widget_values = {}
 
+
 def intro():
-    st.sidebar.success("Select an experiment above.")
+    st.sidebar.success("Select an experiment above")
 
     st.markdown(
         """
@@ -60,78 +67,12 @@ def intro():
 © (or copyright) 2019. Triad National Security, LLC. All rights reserved. This program was produced under U.S. Government contract 89233218CNA000001 for Los Alamos National Laboratory (LANL), which is operated by Triad National Security, LLC for the U.S. Department of Energy/National Nuclear Security Administration. All rights in the program are reserved by Triad National Security, LLC, and the U.S. Department of Energy/National Nuclear Security Administration. The Government is granted for itself and others acting on its behalf a nonexclusive, paid-up, irrevocable worldwide license in this material to reproduce, prepare derivative works, distribute copies to the public, perform publicly and display publicly, and to permit others to do so.
         """
         )
-
-
-
-def test(): 
-    st.write('----Before----')
-    try:
-        cf.read('temp.txt')
-        temp = dict(cf.items('config'))
-        st.write(temp)
-    except: st.write('no temp 8(')
-
-    def make_recording_widget(f):
-        """Return a function that wraps a streamlit widget and records the
-        widget's values to a global dictionary.
-        """
-        def wrapper(label, *args, **kwargs):
-            widget_value = f(label, *args, **kwargs)
-            widget_values[label] = widget_value
-            return widget_value
-
-        return wrapper
-
-    
-    button = make_recording_widget(st.button)
-    number = make_recording_widget(st.number_input)
-    checkbox = make_recording_widget(st.checkbox)
-    #button("recorded button")
-    name = 'recorded number'
-    default = 10
-    if st.button("reset"):
-        widget_values[name+'_default'] = default
-        widget_values['flag'] = False
-    
-    
-    def widget_history(name, default):
-        if checkbox(name+'_checkbox'):
-            try:
-                if widget_values['flag'] == True:
-                    widget_values['flag'] = False
-                    try:
-                        widget_values[name+'_default'] = int(temp[name])
-                        number("recorded number", value = int(temp[name]))
-                    except: number(name, value = widget_values[name+'_default'])
-                else:
-                    number(name, value = widget_values[name+'_default'])
-                st.write('I tried and succeded')
-            except: 
-                widget_values['flag'] = False
-                number(name, value = default)  
-        else:
-            widget_values['flag'] = True        
-            widget_values[name+'_default'] = default
-            
-    name = 'recorded number'
-    widget_history(name, default)
-    
-
         
-    st.write('----After----')
-    st.write("recorded values: ", widget_values)
-    
-    with open('temp.txt', 'w') as file:
-        file.write('[config]\n')
-        for key, value in widget_values.items():
-            file.write('%s = %s\n'%(key, value))
-
-
             
 def cnn3d():
     st.title('Sapsan Configuration')
     st.write('This demo is meant to present capabilities of Sapsan. You can configure each part of the experiment at the sidebar. Once you are done, you can see the summary of your runtime parameters under _Show configuration_. In addition you can review the model that is being used (in the custom setup, you will also be able to edit it). Lastly click the _Run experiment_ button to train the test the ML model.')
-
+    
     st.sidebar.markdown("General Configuration")
     
     try:
@@ -157,7 +98,7 @@ def cnn3d():
             widget_history_unchecked(params)
     
     def widget_history_checked(params):
-        widget_type = {number:int, text:str, checkbox:bool}
+        widget_type = {number:int, number_main:int, text:str, text_main:str, checkbox:bool}
         for i in range(len(params)):
             label = params[i]['label']
             default = params[i]['default']
@@ -178,9 +119,8 @@ def cnn3d():
                 widget_values[label+'_flag'] = False
                 widget(value = widget_type[widget](default), **additional_params)
     
-
     def widget_history_unchecked(params):
-        widget_type = {number:int, text:str, checkbox:bool, selectbox:str}
+        widget_type = {number:int, number_main:int, text:str, text_main:str, checkbox:bool}
         for i in range(len(params)):
             label = params[i]['label']
             default = params[i]['default']
@@ -197,7 +137,6 @@ def cnn3d():
     def selectbox_params():
         widget_values['backend_list'] = ['Fake', 'MLflow']
         widget_values['backend_selection_index'] = widget_values['backend_list'].index(widget_values['backend_selection'])
-
         
     def show_log(progress_slot, epoch_slot):
         from datetime import datetime
@@ -230,6 +169,16 @@ def cnn3d():
                     train_loss = float(lines[-2].split('loss=')[-1])
                     valid_loss = float(lines[-1].split('loss=')[-1])
 
+                '''
+                #to read a .json file
+                data = OrderedDict(json.load(file))
+                elem = list(data.keys())
+
+                if 'epoch' in elem[-1]:
+                    current_epoch = int(elem[-1].rpartition('_')[-1]) + 1
+                else:
+                    current_epoch = -1
+                '''
             if current_epoch == last_epoch or current_epoch == -1:
                 pass
             else:     
@@ -255,7 +204,7 @@ def cnn3d():
             if current_epoch == widget_values['n_epochs']: 
                 return
             
-            time.sleep(0.1)  
+            time.sleep(0.1) 
             
     def run_experiment():
         
@@ -269,22 +218,31 @@ def cnn3d():
             widget_values['mlflow_host'],widget_values['mlflow_port'])
         
         #Load the data
-        x, y = HDF5Dataset(path=widget_values['path'],
-                           features=widget_values['features'],
-                           target=widget_values['target'],
+        
+        features = widget_values['features'].split(',')
+        features = [i.strip() for i in features]
+        
+        target = widget_values['target'].split(',')
+        target = [i.strip() for i in target]        
+        
+        data_loader = HDF5Dataset(path=widget_values['path'],
+                           features=features,
+                           target=target,
                            checkpoints=[0],
                            grid_size=int(widget_values['grid_size']),
                            checkpoint_data_size=int(widget_values['checkpoint_data_size']),
-                           sampler=sampler).load()
+                           sampler=sampler)
+        x, y = data_loader.load()
         st.write("Dataset loaded...")
         
         #Set the experiment
         training_experiment = Train(name=widget_values["experiment name"],
                                      backend=tracking_backend,
                                      model=estimator,
-                                     inputs=x, targets=y)
+                                     inputs=x, targets=y,
+                                     data_parameters = data_loader.get_parameters())
         
-        #Plot progress
+        #Plot progress        
         progress_slot = st.empty()
         epoch_slot = st.empty()
         
@@ -301,22 +259,22 @@ def cnn3d():
         #def evaluate_experiment():
         #--- Test the model ---
         #Load the test data
-        x, y = HDF5Dataset(path=widget_values['path'],
-                           features=widget_values['features'],
-                           target=widget_values['target'],
-                           checkpoints=[0],
+        data_loader = HDF5Dataset(path=widget_values['path'],
+                           features=features,
+                           target=target,
+                           checkpoints=[0], 
                            grid_size=int(widget_values['grid_size']),
                            checkpoint_data_size=int(widget_values['checkpoint_data_size']),
-                           sampler=sampler).load()
+                           sampler=sampler)
+        x, y = data_loader.load()
 
         #Set the test experiment
         evaluation_experiment = Evaluate3d(name=widget_values["experiment name"],
                                            backend=tracking_backend,
                                            model=training_experiment.model,
                                            inputs=x, targets=y,
-                                           grid_size=int(widget_values['grid_size']),
-                                           checkpoint_data_size=int(widget_values['sample_to']))
-
+                                           data_parameters = data_loader.get_parameters())
+        
         #Test the model
         evaluation_experiment.run()
 
@@ -324,8 +282,11 @@ def cnn3d():
         data = y
         #'data', data
         st.pyplot()
-        
+    
     #--- Load Default ---
+    
+    state = SessionState()
+    
     #button = make_recording_widget(st.sidebar.button)
     number = make_recording_widget(st.sidebar.number_input)
     number_main = make_recording_widget(st.number_input)
@@ -335,7 +296,7 @@ def cnn3d():
     selectbox = make_recording_widget(st.sidebar.selectbox)
     
     config_file = st.sidebar.text_input('Configuration file', "st_config.txt", type='default')
-    
+        
     if st.sidebar.button('reload config'):
         #st.caching.clear_cache()
         config = load_config(config_file)
@@ -369,12 +330,12 @@ def cnn3d():
         
         if widget_values['backend_selection'] == 'MLflow':
             widget_history_checked([{'label':'mlflow_host', 'default':config['mlflow_host'], 'widget':text}])
-            widget_history_checked([{'label':'mlflow_port', 'default':config['mlflow_port'], 'widget':number,
-                                                                        'min_value':1024, 'max_value':65535}])
+            widget_history_checked([{'label':'mlflow_port', 'default':config['mlflow_port'], 
+                                     'widget':number, 'min_value':1024, 'max_value':65535}])
     else:
         widget_history_unchecked([{'label':'mlflow_host', 'default':config['mlflow_host'], 'widget':text}])
         widget_history_unchecked([{'label':'mlflow_port', 'default':config['mlflow_port'], 'widget':number,
-                                                                        'min_value':1024, 'max_value':65535}]) 
+                                                                    'min_value':1024, 'max_value':65535}]) 
 
     
     widget_history_checkbox('Data',[{'label':'path', 'default':config['path'], 'widget':text},
@@ -389,7 +350,8 @@ def cnn3d():
     
 
         
-    widget_history_checkbox('Model',[{'label':'n_epochs', 'default':config['n_epochs'], 'widget':number, 'min_value':1},
+    widget_history_checkbox('Model',[{'label':'n_epochs', 
+                                      'default':config['n_epochs'], 'widget':number, 'min_value':1},
                                      {'label':'patience', 'default':config['patience'], 'widget':number, 'min_value':0},
                                      {'label':'min_delta', 'default':config['min_delta'], 'widget':text}])  
 
@@ -402,10 +364,9 @@ def cnn3d():
                                          grid_dim=int(widget_values['grid_size']), 
                                          patience=int(widget_values['patience']), 
                                          min_delta=float(widget_values['min_delta'])))
-
-
+        
     show_config = [
-        ['experiment name', widget_values['experiment name']],
+        ['experiment name',  widget_values["experiment name"]],
         ['data path', widget_values['path']],
         ['features', widget_values['features']],
         ['target', widget_values['target']],
@@ -430,22 +391,30 @@ def cnn3d():
         res = hl.build_graph(estimator.model, torch.zeros([72, 1, 2, 2, 2]))
         st.graphviz_chart(res.build_dot())
 
-    if st.checkbox("Show code of model"):
-        st.code(inspect.getsource(CNN3dModel), language='python')
+    if st.checkbox("Show code of model"):           
+        st.code(inspect.getsource(CNN3dModel), language='python')        
         st.write('***Code editing is available in the local GUI version***')
+            
+    st.markdown("---")
 
     if st.button("Run experiment"):
-        #st.write("Experiment is running. Please hold on...")
-        st.caching.clear_cache()
         start = time.time()
         try: os.remove('logs/logs.txt')
         except: pass
         
+        #p = Process(target=run_experiment)
+        #p.start()
+        #state.pid = p.pid
+        
         run_experiment()
         
-        st.write('Finished in %.2f mins'%((time.time()-start)/60))
+        st.write('Finished in %.2f mins'%((time.time()-start)/60)) 
         st.write('***MLflow interface is available in the local GUI version***')
-
+    
+    #if st.button("Stop experiment"):
+            #sys.exit('Experiment stopped')
+    #        st.stop
+        
     #if st.button("Evaluate experiment"):
     #    #st.write("Experiment is running. Please hold on...")
     #    evaluate_experiment()
@@ -454,15 +423,14 @@ def cnn3d():
         file.write('[config]\n')
         for key, value in widget_values.items():
             file.write('%s = %s\n'%(key, value))
-
+        
         
 def custom():
-    st.markdown("# Available in the local GUI version!")
+    st.markdown("# Construction ongoing!")
     
 def ccsn():
     import os
     
-    st.markdown("# ** Temporarily unavailable - please check back on 6/19 **")    
     st.markdown("# 1D Core-Collapse Supernovae Experiment")
     st.write('Below is an example on our ML implementation within 1D CCSN code developed by Chris Fryer (Los Alamos National Laboratory)')
     
@@ -480,7 +448,74 @@ def config_write(var, file):
     with open(config_file, 'w') as file:
         cf.write(file)
     
+def test(): 
+    st.write('----Before----')
+    try:
+        cf.read('temp.txt')
+        temp = dict(cf.items('config'))
+        st.write(temp)
+    except: st.write('no temp 8(')
+
+    def make_recording_widget(f):
+        """Return a function that wraps a streamlit widget and records the
+        widget's values to a global dictionary.
+        """
+        def wrapper(label, *args, **kwargs):
+            widget_value = f(label, *args, **kwargs)
+            widget_values[label] = widget_value
+            return widget_value
+
+        return wrapper
+
+    def widget_history(name, default):
+        if checkbox(name+'_checkbox'):
+            try:
+                if widget_values['flag'] == True:
+                    widget_values['flag'] = False
+                    try:
+                        widget_values[name+'_default'] = int(temp[name])
+                        number("recorded number", value = int(temp[name]))
+                    except: number(name, value = widget_values[name+'_default'])
+                else:
+                    number(name, value = widget_values[name+'_default'])
+                st.write('I tried and succeded')
+            except: 
+                widget_values['flag'] = False
+                number(name, value = default)  
+        else:
+            widget_values['flag'] = True        
+            widget_values[name+'_default'] = default
     
+    
+    button = make_recording_widget(st.button)
+    number = make_recording_widget(st.number_input)
+    checkbox = make_recording_widget(st.checkbox)
+    #button("recorded button")
+    name = 'recorded number'
+    default = 10
+    if st.button("reset"):
+        widget_values[name+'_default'] = default
+        widget_values[name] = default
+        widget_values['flag'] = False
+        st.write(widget_values[name], widget_values[name+'_default'])
+        #widget_history(name, default)
+    
+    
+
+            
+    name = 'recorded number'
+    print(widget_history(name, default))
+    
+
+        
+    st.write('----After----')
+    st.write("recorded values: ", widget_values)
+    
+    with open('temp.txt', 'w') as file:
+        file.write('[config]\n')
+        for key, value in widget_values.items():
+            file.write('%s = %s\n'%(key, value))
+
    
 
 
@@ -492,4 +527,48 @@ def write_config(config_file, config):
         file.write('[sapsan_config]\n')
         for key, value in config.items():
             file.write('%s = %s \n'%(key, value))
+
+def index_history_checked(params):
+    widget_type = {number:int, text:str, checkbox:bool, selectbox:int}
+    for i in range(len(params)):
+        default = params[i]['default']
+        widget = params[i]['widget']
+        if 'name' in params[i]: name = params[i]['name']
+        else: name = params[i]['label']
+
+        if widget == selectbox: params[i]['input']='index'
+        else: params[i]['input']='value'
+
+        not_widget_params = ['default', 'widget', 'widget_type', 'name', 'input']
+        additional_params = {key:value for key, value in params[i].items() if key not in not_widget_params}
+        try:
+            if widget_values[name+'_flag'] == True:
+                widget_values[name+'_flag'] = False
+                try:
+                    widget_values[name+'_default'] = widget_type[widget](temp[name])
+                    widget(index = widget_type[widget](temp[name]), **additional_params)
+                except: widget(index = widget_values[name+'_default'], **additional_params)
+            else:
+                widget(index = widget_values[name+'_default'], **additional_params)
+        except: 
+            widget_values[name+'_flag'] = False
+            widget(index = widget_type[widget](default), **additional_params)
+            
+            
+            
+        
+        
+        #index_history_checked([{'label':'backend_selection', 'default':1, 
+        #                        'widget':selectbox, 
+        #                        'options':widget_values['backend_list']}])
+        
+        #'name':'backend_selection_index'
+        
+        #widget_values['backend_selection'] = widget_values['backend_list'][widget_values['backend_selection_index']]
+        #st.write('backend print', widget_values['backend_selection'])
+        
+        
+                #widget_history_unchecked([{'label':'backend_selection', 'name':'backend_selection_index', 'default':1, 
+        #                        'widget':selectbox, 
+        #                        'options':widget_values['backend_list']}])
 '''
