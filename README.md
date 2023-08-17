@@ -1,4 +1,4 @@
-# Sapsan's website repo
+# Sapsan's webapp for GCP deployment
 
 Website version of Sapsan's GUI for demonstration purposes at [sapsan.app](http://sapsan.app)
 
@@ -17,5 +17,3 @@ make run-container
 ```shell cript
 make gcloud-deploy
 ```
-
-Test
