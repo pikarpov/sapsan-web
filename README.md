@@ -12,8 +12,8 @@ Sapsan itself is available through [Github](https://github.com/pikarpov-LANL/Sap
 make run-container
 ```
 
-2. Deploy to cloud
+1. Deploy on the local Raspberry Pi
 
 ```shell cript
-make gcloud-deploy
+make rpi-deploy
 ```
