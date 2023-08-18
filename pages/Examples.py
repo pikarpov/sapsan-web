@@ -21,7 +21,7 @@ from streamlit.runtime.scriptrunner.script_run_context import add_script_run_ctx
 #uncomment if cloned from github!
 sys.path.append(str(Path.home())+"/Sapsan/")
 
-from sapsan.lib.backends import FakeBackend, MLflowBackend
+from sapsan.lib.backends import FakeBackend
 from sapsan.lib.data import HDF5Dataset, EquidistantSampling, flatten
 from sapsan.lib import Train, Evaluate
 from sapsan.lib.estimator.cnn.cnn3d_estimator import CNN3d, CNN3dConfig
@@ -318,7 +318,7 @@ if st.session_state.backend_selection=='MLflow':
     show_config.append(['mlflow_port', st.session_state.mlflow_port])
 
 with st.expander("Show configuration"):    
-    st.table(pd.DataFrame(show_config, columns=["Key", "Value"]))
+    st.table(pd.DataFrame(show_config, columns=["Key", "Value"]).astype(str)))
 
 with st.expander("Show model graph"):    
     st.write('Please load the data first or enter the data shape manualy, comma separated.')
