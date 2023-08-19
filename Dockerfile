@@ -9,7 +9,6 @@ WORKDIR /app
 RUN apt-get update
 RUN pip install -U pip
 RUN pip install sapsan
-RUN pip install torch==1.13
 RUN apt-get install ffmpeg libsm6 libxext6  -y
 
 # remember to expose the port your app'll be exposed on.

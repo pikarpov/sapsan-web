@@ -3,11 +3,11 @@
 run:
 	@streamlit run Welcome.py --server.port=8080 --server.address=localhost
 
-run-container:
+build-container:
 	@docker build . -t sapsan-web
-	@docker run -p 8080:8080 sapsan-web
 
-# rpi-deploy:
+run-container:	
+	@docker run -p 8080:8080 sapsan-web
 
 # gcloud-deploy:
 # 	@gcloud app deploy app.yaml
